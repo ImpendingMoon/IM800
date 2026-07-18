@@ -1,0 +1,5 @@
+**/*.bin
+**/*.sym
+**/*.lst
+**/obj
+**/build
