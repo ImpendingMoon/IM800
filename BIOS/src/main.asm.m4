@@ -24,8 +24,7 @@ start:
 
     ; TODO: Initialize integrated devices
 
-
-
+    BKPT 0
 
     ; Scan expansion slots
 find_expansion_cards:

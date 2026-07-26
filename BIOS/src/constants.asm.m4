@@ -18,7 +18,7 @@ bram_length:    .EQU 0x1000
 sram_start:     .EQU 0x200000
 
 ; Expansion Slots
-slot_magic: .EQU 0x58704364
+slot_magic: .EQU 0x67808869
 slot_difference: .EQU 0x040000
 
 slot1_start:    .EQU 0x040000
