@@ -7,7 +7,7 @@ PROGRAM_NAME := bios
 SRC_DIR := src
 BUILD_DIR := build
 
-MAIN := $(SRC_DIR)/main.m4
+MAIN := $(SRC_DIR)/main.asm.m4
 
 EXPANDED := $(BUILD_DIR)/${PROGRAM_NAME}_expanded.asm
 BIN := $(BUILD_DIR)/$(PROGRAM_NAME).bin
