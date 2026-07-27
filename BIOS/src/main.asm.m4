@@ -9,4 +9,5 @@ reset_vector:
 
 include(constants.asm.m4)
 include(start.asm.m4)
+include(expansion.asm.m4)
 include(ivt.asm.m4)

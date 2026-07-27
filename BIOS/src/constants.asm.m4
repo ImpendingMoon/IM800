@@ -1,80 +1,72 @@
 ;******************************************************************************
-; File: constants.m4
-;
+; File: constants.asm.m4
+; Common BIOS constants and memory layout definitions
 ;******************************************************************************
 
-; ERRORS
 errors:
-.unknown: .EQU 0
-.not_implemented: .EQU 1
+    .ok:                    .EQU 0x00  ; Operation completed successfully
+    .unknown:               .EQU 0x01  ; Unknown error
+    .not_implemented:       .EQU 0x02  ; Function not implemented
+    .invalid_parameter:     .EQU 0x03  ; Invalid argument supplied
+    .invalid_address:       .EQU 0x04  ; Invalid memory address
+    .no_space:              .EQU 0x05  ; Resource allocation failed
+    .checksum_failed:       .EQU 0x06  ; Integrity check failed
+    .device_missing:        .EQU 0x07  ; Device/card not present
+    .device_error:          .EQU 0x08  ; Hardware/device failure
+    .timeout:               .EQU 0x09  ; Operation timed out
+    .busy:                  .EQU 0x0A  ; Resource busy
+    .buffer_too_small:      .EQU 0x0D  ; Output buffer insufficient
+
+
+bios_ram:
+    .base:      .EQU 0x010000
+    .length:    .EQU 0x001000
+    .top:       .EQU bios_ram.base + bios_ram.length
+
+system_ram:
+    .base:      .EQU 0x200000
+
+ivt:
+    .base:      .EQU bios_ram.base
+    .length:    .EQU 0x0400
+
+globals:
+    .base: .EQU ivt.base + ivt.length
+
+    .presence:      .EQU 0      ; Slot presence (b1 = slot 1, ..., b7 = slot 7)
+    .device_count:  .EQU 1      ; Number of devices (8 bytes) 
+    .init_errors:   .EQU 2      ; Last device error code (8 bytes)
+    .last_error:    .EQU 10     ; Last BIOS error code (1 byte)
 
 
 
-; BIOS RAM
-bram_start:     .EQU 0x10000
-bram_length:    .EQU 0x1000
+;******************************************************************************
+; Expansion Slot Layout
+; Each slot is 256KB apart and if present, starts with the header structure.
+;******************************************************************************
 
-; System RAM
-sram_start:     .EQU 0x200000
+ex_header:
+    .magic:             .EQU 0          ; Magic number (4 bytes)
+    .checksum:          .EQU 4          ; Fletcher-32 checksum (4 bytes)
+    .rom_length:        .EQU 8          ; ROM length (4 bytes)
+    .api_version:       .EQU 12         ; API version (4 bytes)
+    .init_offset:       .EQU 16         ; Init routine offset (4 bytes)
+    .shutdown_offset:   .EQU 20         ; Shutdown routine offset (4 bytes)
+    .vendor_id:         .EQU 24         ; Vendor ID (2 bytes)
+    .part_id:           .EQU 26         ; Part ID (2 bytes)
+    .reserved:          .EQU 28         ; Reserved area
+    .size:              .EQU 64         ; Header size
+    .magic_value:       .EQU 0x67808869 ; "EXPC"
 
-; Expansion Slots
-slot_magic: .EQU 0x67808869
-slot_difference: .EQU 0x040000
+ex_slots:
+    .count:         .EQU 7
+    .stride:        .EQU 0x040000
+    .base:          .EQU 0x040000
 
-slot1_start:    .EQU 0x040000
-slot1_check:    .EQU slot1_start + 4
-slot1_vendor:   .EQU slot1_check + 4
-slot1_part:     .EQU slot1_vendor + 4
-slot1_init:     .EQU slot1_part + 4
-slot1_shutdown: .EQU slot1_init + 4
-
-slot2_start:    .EQU 0x080000
-slot2_check:    .EQU slot2_start + 4
-slot2_vendor:   .EQU slot2_check + 4
-slot2_part:     .EQU slot2_vendor + 4
-slot2_init:     .EQU slot2_part + 4
-slot2_shutdown: .EQU slot2_init + 4
-
-slot3_start:    .EQU 0x0C0000
-slot3_check:    .EQU slot3_start + 4
-slot3_vendor:   .EQU slot3_check + 4
-slot3_part:     .EQU slot3_vendor + 4
-slot3_init:     .EQU slot3_part + 4
-slot3_shutdown: .EQU slot3_init + 4
-
-slot4_start:    .EQU 0x100000
-slot4_check:    .EQU slot4_start + 4
-slot4_vendor:   .EQU slot4_check + 4
-slot4_part:     .EQU slot4_vendor + 4
-slot4_init:     .EQU slot4_part + 4
-slot4_shutdown: .EQU slot4_init + 4
-
-slot5_start:    .EQU 0x140000
-slot5_check:    .EQU slot5_start + 4
-slot5_vendor:   .EQU slot5_check + 4
-slot5_part:     .EQU slot5_vendor + 4
-slot5_init:     .EQU slot5_part + 4
-slot5_shutdown: .EQU slot5_init + 4
-
-slot6_start:    .EQU 0x180000
-slot6_check:    .EQU slot6_start + 4
-slot6_vendor:   .EQU slot6_check + 4
-slot6_part:     .EQU slot6_vendor + 4
-slot6_init:     .EQU slot6_part + 4
-slot6_shutdown: .EQU slot6_init + 4
-
-slot7_start:    .EQU 0x1C0000
-slot7_check:    .EQU slot7_start + 4
-slot7_vendor:   .EQU slot7_check + 4
-slot7_part:     .EQU slot7_vendor + 4
-slot7_init:     .EQU slot7_part + 4
-slot7_shutdown: .EQU slot7_init + 4
-
-; BIOS RAM
-stack_top: .EQU bram_start + bram_length
-ivt_start: .EQU bram_start
-ivt_length: .EQU 0x400
-
-; GLOBALS (base + offset)
-global_base: .EQU ivt_start + ivt_length
-slot_presence: .EQU 0 ; (+1 byte) (b1-b7 bit set = card present)
+    .slot1.base: .EQU ex_slots.base + (0 * ex_slots.stride)
+    .slot2.base: .EQU ex_slots.base + (1 * ex_slots.stride)
+    .slot3.base: .EQU ex_slots.base + (2 * ex_slots.stride)
+    .slot4.base: .EQU ex_slots.base + (3 * ex_slots.stride)
+    .slot5.base: .EQU ex_slots.base + (4 * ex_slots.stride)
+    .slot6.base: .EQU ex_slots.base + (5 * ex_slots.stride)
+    .slot7.base: .EQU ex_slots.base + (6 * ex_slots.stride)

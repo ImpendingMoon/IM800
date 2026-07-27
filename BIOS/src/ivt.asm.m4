@@ -15,7 +15,7 @@ default_service_handler:
 rom_ivt:
     .DEFD start                         ; 0x00: Reset
     .DEFD default_isr                   ; 0x01: IM 1, reserved
-    .DEFD memory_parity_error_handler   ; 0x02: NMI (Memory Parity Error)
+    .DEFD fatal_error_handler           ; 0x02: NMI (Memory Parity Error)
     .DEFD default_isr                   ; 0x03: Reserved
     .DEFD default_isr                   ; 0x04: Reserved
     .DEFD default_isr                   ; 0x05: Reserved

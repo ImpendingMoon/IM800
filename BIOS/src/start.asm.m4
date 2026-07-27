@@ -4,68 +4,107 @@
 ;******************************************************************************
 
 start:
-    ; TODO: Check BIOS checksum
-    ; TODO: Check BIOS RAM
+    CALL check_bios
+    CP.B A, errors.ok
+    JR NZ, fatal_error_handler
 
-    LD SP, stack_top                    ; Load stack pointer
-    LD IY, global_base                  ; Load global base
+    CALL check_bios_ram
+    CP.B A, errors.ok
+    JR NZ, fatal_error_handler
+
+    ; Set up pointers
+    LD SP, bios_ram.top
+    LD IY, globals.base
 
     ; Set up IVT
-    LD DE, ivt_start
+    LD DE, ivt.base
     LD HL, rom_ivt
-    LD BC, ivt_length / 2
+    LD BC, ivt.length / 2
     BLD I, R, WORD
+    LD I, ivt.base >> 10
 
-    ; TODO: Initialize integrated devices
+    ; Initialize integrated devices if they exist
 
-    ; Scan expansion slots
-find_expansion_cards:
-    LD.B [IY+slot_presence], 0          ; Clear presence bitmap
-    LD HL, slot1_start                  ; Start
-    LD B, 1                             ; Start at slot/bit 1
-.loop:
-    CP.D [HL], slot_magic               ; Magic number at start?
-    JR.B NZ, .nocard                    ; No, skip
-    SET [IY+slot_presence], B           ; Yes, set presence bit
-.nocard:
-    INC B                               ; Increment slot
-    ADD HL, slot_difference             ; Increment slot pointer
-    CP.B B, 8                           ; Past final slot?
-    JR.B C, .loop                       ; No, continue
+    ; Set up expansion slots
+    CALL detect_slots
+    CALL check_slots
+    CALL init_slots
 
-    ; TODO: Check each card's checksum
-    ; TODO: Check system RAM
-    ; TODO: Check disks for bootable disk
-    ; TODO: If bootable disk found, load block 1 into 0x20000 and jump
-    ; TODO: Else, load built-in shell
+    ; Check system RAM
+    CALL check_system_ram
+    CP.B A, errors.ok
+    JR NZ, fatal_error_handler
 
-    ; TODO: TEMP
-    BKPT 0
+    ; Boot to software
+    JP boot_default
 
 
-run_expansion_init:
-    LD IX, slot1_start                  ; Start at card
-    LD A, 1                             ; Start at slot/bit 1
-.loop:
-    BIT.B [IY+slot_presence], A         ; Is card present? 
-    JR.B Z, .nocard                     ; No, skip
-    LD.D DE, [IX+16]                    ; Yes, load init routine offset
-    LD HL, IX                           ; Load current slot memory start
-    ADD HL, DE                          ; Add offset to get full init vector
-    PUSH AF                             ; Save slot iterator
-    PUSH IX                             ; Save offset
-    PUSH IY                             ; Save global pointer
-    CALL HL                             ; Call init routine
-    POP IY                              ; Restore global pointer
-    POP IX                              ; Restore offset
-    POP AF                              ; Restore slot iterator
-.nocard:
-    INC A                               ; Increment slot
-    ADD IX, slot_difference             ; Increment slot pointer
-    CP.B A, 8                           ; Past final slot?
-    JR.B C, .loop                       ; No, continue
+;******************************************************************************
+; Function: error check_bios(void)
+; Parameters:
+;  void
+; Returns:
+;  error
+; Notes:
+;******************************************************************************
+check_bios:
+    ; TODO
+    RET
 
-memory_parity_error_handler:
+
+;******************************************************************************
+; Function: error check_bios_ram(void)
+; Parameters:
+;  void
+; Returns:
+;  A = error
+; Notes:
+;******************************************************************************
+check_bios_ram:
+    ; TODO
+    RET
+
+
+;******************************************************************************
+; Function: error check_system_ram(void)
+; Parameters:
+;  void
+; Returns:
+;  A = error
+; Notes:
+;******************************************************************************
+check_system_ram:
+    ; TODO
+    RET
+
+
+;******************************************************************************
+; Function: void boot_default(void)
+; Parameters:
+;  void
+; Returns:
+;  N/A
+; Notes:
+;  Boots the first bootable disk if one is found, else starts BASIC
+;******************************************************************************
+boot_default:
+    ; TODO
+    ; TEMP
     BKPT 0
     HALT
-    JP $-2
+    JR.B $-2
+
+
+;******************************************************************************
+; Function: void fatal_error_handler(void)
+; Parameters:
+;  void
+; Returns:
+;  N/A
+; Notes:
+;******************************************************************************
+fatal_error_handler:
+    ; TODO probably beep a speaker
+    BKPT 0
+    HALT
+    JR.B $-2
