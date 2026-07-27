@@ -4,13 +4,8 @@
 ;******************************************************************************
 
 start:
-    CALL check_bios
-    CP.B A, errors.ok
-    JR NZ, fatal_error_handler
-
-    CALL check_bios_ram
-    CP.B A, errors.ok
-    JR NZ, fatal_error_handler
+    JR check_bios
+.check_bios_ok:
 
     ; Set up pointers
     LD SP, bios_ram.top
@@ -24,6 +19,8 @@ start:
     LD I, ivt.base >> 10
 
     ; Initialize integrated devices if they exist
+
+    BKPT 0
 
     ; Set up expansion slots
     CALL detect_slots
@@ -49,7 +46,8 @@ start:
 ;******************************************************************************
 check_bios:
     ; TODO
-    RET
+    XOR A, A
+    JR check_bios_ram
 
 
 ;******************************************************************************
@@ -62,7 +60,8 @@ check_bios:
 ;******************************************************************************
 check_bios_ram:
     ; TODO
-    RET
+    XOR A, A
+    JR start.check_bios_ok
 
 
 ;******************************************************************************
@@ -75,6 +74,7 @@ check_bios_ram:
 ;******************************************************************************
 check_system_ram:
     ; TODO
+    XOR A, A
     RET
 
 

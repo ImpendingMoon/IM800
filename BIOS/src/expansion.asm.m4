@@ -17,6 +17,7 @@ get_slot_base:
     DEC A                               ; Make 0-indexed
     LEA HL, A, DWORD                    ; Index into table
     LD HL, [HL]                         ; Load address from table
+    INC A                               ; Restore original index
     RET
 
 .table:
@@ -38,12 +39,13 @@ get_slot_base:
 ; Notes:
 ;******************************************************************************
 detect_slots:
+    LD.B [IY+globals.presence], 0       ; Clear presence bits
     LD A, 1                             ; Start at card 1
 .loop:
     CALL get_slot_base                  ; Get base address
     CP.D [HL], ex_header.magic_value    ; = "EXPC"?
     JR.B NZ, .nocard                    ; No, not present
-    SET [IY+global.presence], A         ; Yes, present
+    SET [IY+globals.presence], A        ; Yes, present
 .nocard:
     INC A                               ; Next slot
     CP.B A, ex_slots.count + 1          ; Past maximum?
@@ -61,6 +63,7 @@ detect_slots:
 ;******************************************************************************
 check_slots:
     ; TODO
+    XOR A, A
     RET
 
 
@@ -75,7 +78,7 @@ check_slots:
 init_slots:
     LD A, 1                             ; Start at card 1
 .loop:
-    BIT [IY+global.presence], A         ; Is card present?
+    BIT [IY+globals.presence], A        ; Is card present?
     JR.B Z, .nocard                     ; No, skip
     CALL get_slot_base                  ; Yes, get base address
     LD DE, HL                           ; Copy base address
@@ -85,7 +88,7 @@ init_slots:
     PUSH AF                             ; Save count
     CALL DE                             ; Call slot init routine
     POP AF                              ; Restore count
-    LD IY, global.base                  ; Restore global pointer (just in case)
+    LD IY, globals.base                 ; Restore global pointer (just in case)
 .nocard:
     INC A                               ; Next slot
     CP.B A, ex_slots.count + 1          ; Past maximum?
@@ -104,7 +107,7 @@ init_slots:
 shutdown_slots:
     LD A, 1                             ; Start at card 1
 .loop:
-    BIT [IY+global.presence], A         ; Is card present?
+    BIT [IY+globals.presence], A        ; Is card present?
     JR.B Z, .nocard                     ; No, skip
     CALL get_slot_base                  ; Yes, get base address
     LD DE, HL                           ; Copy base address
@@ -114,7 +117,7 @@ shutdown_slots:
     PUSH AF                             ; Save count
     CALL DE                             ; Call slot shutdown routine
     POP AF                              ; Restore count
-    LD IY, global.base                  ; Restore global pointer (just in case)
+    LD IY, globals.base                 ; Restore global pointer (just in case)
 .nocard:
     INC A                               ; Next slot
     CP.B A, ex_slots.count + 1          ; Past maximum?
