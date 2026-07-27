@@ -18,8 +18,6 @@ start:
 
     ; TODO: Initialize integrated devices
 
-    BKPT 0
-
     ; Scan expansion slots
 find_expansion_cards:
     LD.B [IY+slot_presence], 0          ; Clear presence bitmap
@@ -33,7 +31,7 @@ find_expansion_cards:
     INC B                               ; Increment slot
     ADD HL, slot_difference             ; Increment slot pointer
     CP.B B, 8                           ; Past final slot?
-    JR C, .loop                         ; No, continue
+    JR.B C, .loop                       ; No, continue
 
     ; TODO: Check each card's checksum
     ; TODO: Check system RAM
@@ -43,8 +41,29 @@ find_expansion_cards:
 
     ; TODO: TEMP
     BKPT 0
-    HALT
-    JP $-2
+
+
+run_expansion_init:
+    LD IX, slot1_start                  ; Start at card
+    LD A, 1                             ; Start at slot/bit 1
+.loop:
+    BIT.B [IY+slot_presence], A         ; Is card present? 
+    JR.B Z, .nocard                     ; No, skip
+    LD.D DE, [IX+16]                    ; Yes, load init routine offset
+    LD HL, IX                           ; Load current slot memory start
+    ADD HL, DE                          ; Add offset to get full init vector
+    PUSH AF                             ; Save slot iterator
+    PUSH IX                             ; Save offset
+    PUSH IY                             ; Save global pointer
+    CALL HL                             ; Call init routine
+    POP IY                              ; Restore global pointer
+    POP IX                              ; Restore offset
+    POP AF                              ; Restore slot iterator
+.nocard:
+    INC A                               ; Increment slot
+    ADD IX, slot_difference             ; Increment slot pointer
+    CP.B A, 8                           ; Past final slot?
+    JR.B C, .loop                       ; No, continue
 
 memory_parity_error_handler:
     BKPT 0
