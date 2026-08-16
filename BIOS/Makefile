@@ -1,6 +1,7 @@
 M4 ?= m4
 ASSEMBLER ?= IM800Asm
 EMULATOR ?= IM800Emu
+PYTHON ?= python3
 
 PROGRAM_NAME := bios
 
@@ -30,6 +31,7 @@ $(EXPANDED): $(MAIN) $(M4_SOURCES) | $(BUILD_DIR)
 
 $(BIN): $(EXPANDED)
 	$(ASSEMBLER) -o $(BIN) -s $(SYMBOLS) -l $(LISTING) $<
+	$(PYTHON) ./fletcher32.py $(BIN)
 
 run: $(BIN)
 	$(EMULATOR) $(BIN) $(SYMBOLS)

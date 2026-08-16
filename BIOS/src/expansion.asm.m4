@@ -62,8 +62,27 @@ detect_slots:
 ; Notes:
 ;******************************************************************************
 check_slots:
-    ; TODO
-    XOR A, A
+    LD B, 1                             ; Start at card 1
+.loop:
+    BIT [IY+globals.presence], B        ; Is card present?
+    JR.B Z, .nocard                     ; No, skip
+    CALL get_slot_base                  ; Yes, get base address
+    LD IX, HL                           ; Move to index pointer
+    LEA HL, ex_header.rom_length, BYTE  ; Point to ROM length/start of checked
+    LD.D DE, [HL]                       ; Load ROM length in bytes
+    SRL DE, 1                           ; /2 to words
+    EX HL, DE                           ; HL = count, DE = pointer
+    CALL fletcher32                     ; Calculate checksum
+    CP.D HL, [IX+ex_header.checksum]    ; Compare calculated to stored checksum
+    JR.B Z, .nocard                     ; Equal, continue
+    LD HL, IY                           ; HL = global pointer
+    LEA HL, globals.init_errors, BYTE   ; Index to init errors array
+    LEA HL, B, BYTE                     ; Index to current slot's entry
+    LD.B [HL], errors.checksum_failed   ; Write error code
+.nocard:
+    INC B                               ; Next slot
+    CP.B B, ex_slots.count + 1          ; Past maximum?
+    JR.B C, .loop                       ; No, continue
     RET
 
 
@@ -80,6 +99,11 @@ init_slots:
 .loop:
     BIT [IY+globals.presence], A        ; Is card present?
     JR.B Z, .nocard                     ; No, skip
+    LD HL, IY                           ; HL = global pointer
+    LEA HL, globals.init_errors, BYTE   ; Index to init errors array
+    LEA HL, B, BYTE                     ; Index to current slot's entry
+    CP.B [HL], errors.ok                ; Is card OK?
+    JR.B NZ, .nocard                    ; No, don't run init
     CALL get_slot_base                  ; Yes, get base address
     LD DE, HL                           ; Copy base address
     LEA HL, ex_header.init_offset, BYTE ; Index to init offset
@@ -109,6 +133,11 @@ shutdown_slots:
 .loop:
     BIT [IY+globals.presence], A        ; Is card present?
     JR.B Z, .nocard                     ; No, skip
+    LD HL, IY                           ; HL = global pointer
+    LEA HL, globals.init_errors, BYTE   ; Index to init errors array
+    LEA HL, B, BYTE                     ; Index to current slot's entry
+    CP.B [HL], errors.ok                ; Is card OK?
+    JR.B NZ, .nocard                    ; No, don't run shutdown
     CALL get_slot_base                  ; Yes, get base address
     LD DE, HL                           ; Copy base address
     LEA HL, ex_header.shutdown_offset, BYTE ; Index
