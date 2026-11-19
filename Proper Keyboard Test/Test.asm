@@ -1,248 +1,209 @@
 ;*******************************************************************************
-; Test.asm
-; Tests converting keyboard scancodes into ASCII text 
+; test.asm
+; Tests converting scancodes into keycodes, and printing them as ASCII
 ;*******************************************************************************
 
 reset_vector:
-	.DEFD start
-	
+    .DEFD start
+
 start:
-	; Set global pointer
-	LD IY, global
+    LD SP, stack_top
+    LD IY, gp
 
-	; Clear VRAM
-	LD HL, 0x00400000
-	LD DE, 0x00400002
-	LD BC, 1999
-	LD.W [HL], 0
-	BLD I, R, WORD
-	
-	; Enable display, no cursor
-	LD A, 1
-	OUT.B [0x01], A
-	
-	; Set HL to the start of VRAM
-	LD HL, 0x00400000
+.clear_mem:
+    XOR A, A                            ; Constant 0
+
+    LD HL, gp                           ; Clear global data with LDIR trick
+    LD DE, gp+1
+    LD.W [HL], A                        ; Seed 0
+    LD BC, gp.size / 2 - 1              ; /2 for word size, -1 for seed 0
+    BLD I, R, WORD                      ; Maybe add a FILL instruction?
+
+    LD HL, vram                         ; Same trick to fill VRAM with 0
+    LD DE, vram+1
+    LD.W [HL], A
+    LD BC, vram.size / 2 - 1
+    BLD I, R, WORD
+
+.setup_devices:
+    XOR A, A                            ; Constant 0
+    OUT.B [ports.vdp_cur_col], A        ; Reset cursor column
+    OUT.B [ports.vdp_cur_row], A        ; Reset cursor row
+
+    LD A, flags.vdp_state_display | flags.vdp_state_cursor
+    OUT.B [ports.vdp_state], A          ; Enable video and cursor
+
+    LD I, ivt >> 10                     ; Load interrupt vector table base
+    IM 2                                ; Interrupt Mode 2
+    EI                                  ; Enable interrupts
+
+    LD A, flags.kbd_state_int           ; Enable keyboard interrupts
+    OUT.B [ports.kbd_state], A
+
 .loop:
-	CALL getkey
-	
-	JR.B .loop
+    ; TODO:
+    ; while(true)
+    ;   GetKeycode
+    ;   KeycodeToAscii
+    ;   Putc
+
+.hadcf:                                 ; Halt and Don't Catch Fire
+    HALT                                ; Because HALT is a low-power state
+    JR.W .hadcf                         ; :)
 
 
 
 ;*******************************************************************************
-; Waits for a full key event and returns it
+; FUNCTION: byte get_scancode(void)
+; Gets the next scancode from the keyboard driver. Blocks until one is available
+;
+; Parameters: N/A
+; Returns:
+; - A: (byte) Scancode
 ;*******************************************************************************
-getkey:
-	PUSH BC
-	PUSH DE
-	PUSH HL
-	
+get_scancode:
+    PUSH BC
+    
+    XOR B, B                            ; Clear B for indexing
 .loop:
-	XOR A, A			; Clear A
-.waitforscancode:
-	IN.B A, [0x04]			; Load from keyboard queue 
-	JAZ .waitforscancode		; Repeat until non-zero
-	
-	CP.B [IY+global.extended_step], 0 ; In extended scancode?
-	JR.B NZ, .getextendedkey	; Yes, continue handling that
+    LD.B B, [IY+gp.sc_buf_w]            ; B = write index
+    LD.B C, [IY+gp.sc_buf_r]            ; C = read index
+    CP.B B, C                           ; B == C (buffer empty)?
+    JR.W NZ, .read                      ; No, read the next scancode
+    HALT                                ; Yes, wait for interrupt
+    JR.W .loop                          ; Try again
 
-	CP.B [IY+global.pause_step], 0	; In pause scancode?
-	JR.B NZ, .getpausekey		; Yes, continue handling that
+.read:
+    LD BC, gp + gp.sc_buf               ; Load base pointer
+    LEA BC, B, BYTE                     ; Index into it
+    LD.B A, [BC]                        ; Load scancode into A.lo
 
-	CP.B A, 0xE0			; Extended scancode start?
-	JR.B NZ, .noextended		; No, skip
-	INC.B [IY+global.extended_step] ; Set extended step
-	JR.B .loop			; Get next scancode
-	
-.noextended:
-	CP.B A, 0xE1			; Pause scancode start?
-	JR.B NZ, .nopause		; No, skip
-	INC.B [IY+global.pause_step]	; Set pause step
-	JR.B .loop			; Get next scancode
-	
-.nopause:
-	XOR B, B			; Clear B, used for break temp
-	TST.B A, 0x80			; Break bit set?
-	JR.B NZ, .nobreak		; No, skip
-	INC B				; Yes, mark as set for later
-.nobreak:
+    INC.B [IY+gp.sc_buf_r]              ; Increment read index
 
-	LD HL, sc_to_kc_map		; Load pointer to conversion table
-	LEA HL, A, BYTE			; Index into it
-	LD.B H, [HL]			; Load keycode
-	AND.B H, 0x00FF			; Clear leftover upper byte
-					; Fallthrough to create keyevent
-; Private subroutine:
-; H = keycode
-; B = break?
-.create_keyevent:
-	XOR HL, HL			; Clear HL for key event struct
-	LD.B L, [IY.global.keyflags]	; Load current flag state
-	TST.B B, B			; Is break?
-	JR.B Z, .event_nobreak		; No, skip
-	OR.B L, keyflags.break		; Yes, set flag
-.event_nobreak:
-	EXH L				; Move keyflag to upper byte of L
-	LD DE, kc_to_char_map		; Load pointer to conversion table
-	LEA DE, H, BYTE			; 
-					; Fallthrough to end
+    POP BC
+    RET
+
+
+
+;*******************************************************************************
+; FUNCTION: (byte, bool) get_keycode(void)
+; Converts the next scancode(s) into a keycode. Blocks until one is available.
+;
+; Parameters: N/A
+; Returns:
+; - A: (byte) Scancode
+; - L: (bool) Released
+;*******************************************************************************
+get_keycode:
+    PUSH IX
+    LD IX, SP
+    SUB SP, .frame_size
+
+    PUSH BC
+    PUSH HL
+
+    LD.B [IX-.extended_step], 0
+    LD.B [IX-.pause_step], 0
+    LD.B [IX-.keycode], 0
+    LD.B [IX-.released], 0
+
+.loop:
+    CR get_scancode                     ; A = scancode
+
+    LD.B B, [IX-.extended_step]         ; Load current extended step
+    TST.B B, B                          ; Processing an extended scancode?
+    JR.W Z, .check_in_pause             ; No, check for pause scancode
+.handle_extended:                       ; Yes, handle extended scancode
+    TST.B A, break_bit                  ; Is break bit set?
+    JR.W NZ, .ex_not_break              ; No, skip
+    AND.B A, ~(break_bit) & 0xFF        ; Yes, clear the scancode bit
+    LD.B [IX-.released], 1              ; Set released flag
+.ex_not_break:
+    XOR B, B                            ; Index counter
+.ex_search_loop:
+    CP B, ext_sc_to_kc.size             ; In bounds?
+    JR.W NC, .ex_search_not_found       ; No, scancode not found
+    LD HL, ext_sc_to_kc                 ; Base pointer to linear search table
+    LEA HL, B, WORD                     ; (scancode, keycode) ext_sc_to_kc[B]
+    INC B                               ; B++
+    CP.B A, [HL]                        ; Scancodes equal?
+    JR.W NZ, .ex_search_loop            ; No, check next
+.ex_search_found:
+    INC HL                              ; Yes, point to keycode
+    LD.B A, [HL]                        ; Load keycode from table
+    LD.B [IX-.keycode], A               ; Store keycode
+    JR.W .end                           ; End
+
+.ex_search_not_found:
+    LD.B [IX-.keycode], Keycode.null    ; Invalid keycode
+    JR.W .end                           ; Skip to end
+
+.check_in_pause:
+    LD.B B, [IX-.pause_step]            ; Load current pause step
+    TST.B B, B                          ; Processing a pause scancode?
+    JR.W Z, .handle_normal              ; No, handle normally
+.handle_pause:                          ; Yes, handle pause sequence
+    LD HL, pause_sequence               ; Base pointer to search table
+    LEA HL, B, BYTE                     ; pause_sequence[pause_step]
+    LD.B C, [HL]                        ; Load expected byte
+    CP.B A, C                           ; Match?
+    JR.W NZ, .bad_pause                 ; No, bad sequence
+    CP.B B, pause_sequence.size         ; At the end of the sequence?
+    JR.W NC, .pause_found               ; Yes, set keycode
+    INC.B [IX-.pause_step]              ; No, increment step
+    JR.W .loop                          ; Go again
+.pause_found:
+    LD.B [IX-.keycode], Keycode.pause   ; Yes, set keycode
+    JR.W .end                           ; End
+.bad_pause:
+    LD.B [IX-.pause_step], 0            ; Clear pause step
+    JR.W .handle_normal                 ; Retry processing
+
+.handle_normal:
+    CP.B A, ex_scancode                 ; Extended scancode?
+    JR.W NZ, .not_extended              ; No, skip
+    LD.B [IX-.extended_step], 1         ; Set extended step flag
+    JR.W .loop                          ; Go again
+
+.not_extended:
+    CP.B A, pause_scancode              ; Start of pause scancode sequence?
+    JR.W NZ, .not_pause                 ; No, skip
+    LD.B [IX-.pause_step], 1            ; Set pause step counter
+    JR.W .loop                          ; Go again
+
+.not_pause:
+    TST.B A, break_bit                  ; Is break bit set?
+    JR.W Z, .not_break                  ; No, skip
+    AND.B A, ~(break_bit) & 0xFF        ; Yes, clear the scancode bit
+    LD.B [IX-.released], 1              ; Set released flag
+.not_break:
+    CP.B A, sc_to_kc.size               ; In bounds?
+    JR.W C, .lookup                     ; Yes, index into table
+    LD.B [IX-.keycode], Keycode.null    ; No, invalid keycode
+    JR.W .end                           ; Skip to end
+.lookup:
+    LD BC, sc_to_kc                     ; Base pointer
+    LEA BC, A, BYTE                     ; Index to sc_to_kc[scancode]
+    LD.B A, [BC]                        ; Load keycode
+    LD.B [IX-.keycode], A               ; Store scancode
+
 .end:
-	POP HL
-	POP DE
-	POP BC
-	RET
+    POP HL
+    POP BC
 
-.getextendedkey:
+    LD.B A, [IX-.keycode]              ; Move scancode to return register
+    LD.B L, [IX-.released]             ; Move released to return register
 
-	RET
+    LD SP, IX
+    POP IX
+    RET
 
-.getpausekey:
-	RET
+.extended_step: .EQU 0
+.pause_step: .EQU .extended_step + 1
+.keycode: .EQU .pause_step + 1
+.released: .EQU .keycode + 1
+.frame_size: .EQU .released + 1
 
-;*******************************************************************************
-; Global variables
-;*******************************************************************************
-	.ORG 0x00200000
-global:
-.keyflags: .EQU global + 0		; State of ctrl, shift, alt, locks
-.extended_step: .EQU .keyflags + 1	; What byte of extended/print next?
-.pause_step: .EQU .extended_step + 1	; What byte of pause scancode next?
-
-;*******************************************************************************
-; Key Event struct
-;*******************************************************************************
-keyevent: .EQU 0
-.character: .EQU 0
-.flags: .EQU 1
-.keycode: .EQU 2
-._size: .EQU 4
-
-;*******************************************************************************
-; Key Event Flag bitmask
-;*******************************************************************************
-keyflag: .EQU 0
-.shift: .EQU 0x01
-.ctrl: .EQU 0x02
-.alt: .EQU 0x04
-.caps_lock: .EQU 0x08
-.num_lock: .EQU 0x10
-.scroll_lock: .EQU 0x20
-.break: .EQU 0x80
-
-;*******************************************************************************
-; Keycode enum
-; Maps printable characters to ASCII (lowercase)
-; Maps non-printable keys around free space
-;*******************************************************************************
-keycodes: .EQU 0
-.null: .EQU 0
-
-; Printable ASCII set
-.apostrophe: .EQU 39
-.comma: .EQU 44
-.minus: .EQU 45
-.period: .EQU 46
-.slash: .EQU 47
-.num_0: .EQU 48
-.num_1: .EQU 49
-.num_2: .EQU 50
-.num_3: .EQU 51
-.num_4: .EQU 52
-.num_5: .EQU 53
-.num_6: .EQU 54
-.num_7: .EQU 55
-.num_8: .EQU 56
-.num_9: .EQU 57
-.semicolon: .EQU 59
-.less_than: .EQU 60
-.equal: .EQU 61
-.greater_than: .EQU 62
-.left_bracket: .EQU 91
-.backslash: .EQU 92
-.right_bracket: .EQU 93
-.grave: .EQU 96
-.a: .EQU 97
-.b: .EQU 98
-.c: .EQU 99
-.d: .EQU 100
-.e: .EQU 101
-.f: .EQU 102
-.g: .EQU 103
-.h: .EQU 104
-.i: .EQU 105
-.j: .EQU 106
-.k: .EQU 107
-.l: .EQU 108
-.m: .EQU 109
-.n: .EQU 110
-.o: .EQU 111
-.p: .EQU 112
-.q: .EQU 113
-.r: .EQU 114
-.s: .EQU 115
-.t: .EQU 116
-.u: .EQU 117
-.v: .EQU 118
-.w; .EQU 119
-.x: .EQU 120
-.y: .EQU 121
-.z; .EQU 122
-
-; ASCII control set
-.backspace: .EQU 8
-.tab: .EQU 9
-.enter: .EQU 10
-.delete: .EQU 127
-
-; Other keys, fit in around ASCII keys
-.escape: .EQU 1
-.f1: .EQU 2
-.f2: .EQU 3
-.f3: .EQU 4
-.f4: .EQU 5
-.f5: .EQU 6
-.f6: .EQU 7
-.f7: .EQU 8
-.f8: .EQU 9
-.f9: .EQU 10
-.f10: .EQU 11
-.f11: .EQU 12
-.f12: .EQU 13
-.print: .EQU 14
-.pause: .EQU 15
-.insert: .EQU 16
-.delete: .EQU 17
-.home: .EQU 18
-.end: .EQU 19
-.page_up: .EQU 20
-.page_down: .EQU 21
-.arrow_up: .EQU 22
-.arrow_down: .EQU 23
-.arrow_left: .EQU 24
-.arrow_right: .EQU 25
-.np_slash: .EQU 26
-.np_asterisk: .EQU 27 
-.np_minus: .EQU 28
-.np_plus: .EQU 29
-.np_enter: .EQU 30
-.np_0: .EQU 31
-.np_1: .EQU 32
-.np_2: .EQU 33
-.np_3: .EQU 34
-.np_4: .EQU 35
-.np_5: .EQU 36
-.np_6: .EQU 37
-.np_7: .EQU 38
-.np_8: .EQU 40
-.np_9: .EQU 41
-.caps_lock: .EQU 42
-.num_lock: .EQU 43
-.scroll_lock: .EQU 58
-.shift: .EQU 63
-.ctrl: .EQU 64
-.alt: .EQU 65
-.right_shift: .EQU 66
-.right_ctrl: .EQU 67
-.right_alt: .EQU 68
-
+%include "tables.asm"
+%include "ivt.asm"
+%include "constants.asm"
