@@ -23,7 +23,8 @@ keyboard_isr:
     JR.B Z, .end                        ; Yes, return immediately
 
     IN.B A, [ports.kbd_scancode]        ; Read next scancode
-    JR.B Z, .end                        ; Zero, no scancodes left
+    TST.B A, A                          ; Zero?
+    JR.B Z, .end                        ; Yes, no scancodes left
 
     LD HL, gp + gp.sc_buf               ; Point to scancode buffer
     LEA HL, B, BYTE                     ; Index (recalc for index wraparound)
@@ -62,7 +63,6 @@ ivt:                                    ; Interrupt Vector Table
     .DEFD default_isr                   ; 0x0E
     .DEFD default_isr                   ; 0x0F
     .DEFD keyboard_isr                  ; 0x10 (Keyboard)
-    .DEFD default_isr                   ; 0x10
     .DEFD default_isr                   ; 0x11
     .DEFD default_isr                   ; 0x12
     .DEFD default_isr                   ; 0x13
