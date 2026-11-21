@@ -77,14 +77,15 @@ start:
 get_scancode:
     PUSH BC
     
-    XOR B, B                            ; Clear B for indexing
+    XOR C, C                            ; Clear C for indexing
 .loop:
+    DI
     LD.B B, [IY+gp.sc_buf_w]            ; B = write index
     LD.B C, [IY+gp.sc_buf_r]            ; C = read index
     CP.B B, C                           ; B == C (buffer empty)?
     JR.W NZ, .read                      ; No, read the next scancode
+    EI
     HALT                                ; Yes, wait for interrupt
-    BKPT 0
     JR.W .loop                          ; Try again
 
 .read:
@@ -122,19 +123,19 @@ get_keycode:
 
 .loop:
     CR get_scancode                     ; A = scancode
-
+    XOR B, B                            ; Clear for later LEA
     LD.B B, [IX-.extended_step]         ; Load current extended step
     TST.B B, B                          ; Processing an extended scancode?
     JR.W Z, .check_in_pause             ; No, check for pause scancode
 .handle_extended:                       ; Yes, handle extended scancode
     TST.B A, break_bit                  ; Is break bit set?
-    JR.W NZ, .ex_not_break              ; No, skip
+    JR.W Z, .ex_not_break               ; No, skip
     AND.B A, ~(break_bit) & 0xFF        ; Yes, clear the scancode bit
     LD.B [IX-.released], 1              ; Set released flag
 .ex_not_break:
     XOR B, B                            ; Index counter
 .ex_search_loop:
-    CP B, ext_sc_to_kc.size             ; In bounds?
+    CP B, ext_sc_to_kc.size / 2         ; In bounds?
     JR.W NC, .ex_search_not_found       ; No, scancode not found
     LD HL, ext_sc_to_kc                 ; Base pointer to linear search table
     LEA HL, B, WORD                     ; (scancode, keycode) ext_sc_to_kc[B]
@@ -161,7 +162,7 @@ get_keycode:
     LD.B C, [HL]                        ; Load expected byte
     CP.B A, C                           ; Match?
     JR.W NZ, .bad_pause                 ; No, bad sequence
-    CP.B B, pause_sequence.size         ; At the end of the sequence?
+    CP.B B, pause_sequence.size - 1     ; At the end of the sequence?
     JR.W NC, .pause_found               ; Yes, set keycode
     INC.B [IX-.pause_step]              ; No, increment step
     JR.W .loop                          ; Go again
@@ -196,6 +197,7 @@ get_keycode:
     JR.W .end                           ; Skip to end
 .lookup:
     LD BC, sc_to_kc                     ; Base pointer
+    AND A, 0x00FF                       ; Clear high byte of A
     LEA BC, A, BYTE                     ; Index to sc_to_kc[scancode]
     LD.B A, [BC]                        ; Load keycode
     LD.B [IX-.keycode], A               ; Store scancode
@@ -210,7 +212,7 @@ get_keycode:
     POP IX
     RET
 
-.extended_step: .EQU 0
+.extended_step: .EQU 1
 .pause_step: .EQU .extended_step + 1
 .keycode: .EQU .pause_step + 1
 .released: .EQU .keycode + 1
@@ -238,36 +240,36 @@ update_keyflags:
 
     CP.B A, Keycode.lshift              ; Is modifier key?
     JR.W NZ, .1                         ; No, go to next check
-    AND.W H, ~(KeyFlag.lshift) & 0xFF   ; Yes, clear flag
+    AND.W H, ~KeyFlag.lshift            ; Yes, clear flag
     JR.W .calculate_combined            ; Break
 .1:
     CP.B A, Keycode.rshift              ; Is a modifier key?
     JR.W NZ, .2                         ; No, go to next check
-    AND.W H, ~(KeyFlag.rshift) & 0xFF   ; Yes, clear flag
+    AND.W H, ~KeyFlag.rshift            ; Yes, clear flag
     JR.W .calculate_combined            ; Break
 .2:
     CP.B A, Keycode.lctrl               ; Is a modifier key?
     JR.W NZ, .3                         ; No, go to next check
-    AND.W H, ~(KeyFlag.lctrl) & 0xFF    ; Yes, clear flag
+    AND.W H, ~KeyFlag.lctrl             ; Yes, clear flag
     JR.W .calculate_combined            ; Break
 .3:
     CP.B A, Keycode.rctrl               ; Is a modifier key?
     JR.W NZ, .4                         ; No, go to next check
-    AND.W H, ~(KeyFlag.rctrl) & 0xFF    ; Yes, clear flag
+    AND.W H, ~KeyFlag.rctrl             ; Yes, clear flag
     JR.W .calculate_combined            ; Break
 .4:
     CP.B A, Keycode.lalt                ; Is a modifier key?
     JR.W NZ, .5                         ; No, go to next check
-    AND.W H, ~(KeyFlag.lalt) & 0xFF     ; Yes, clear flag
+    AND.W H, ~KeyFlag.lalt              ; Yes, clear flag
     JR.W .calculate_combined            ; Break
 .5:
     CP.B A, Keycode.ralt                ; Is a modifier key?
     JR.W NZ, .calculate_combined        ; No, go to next check
-    AND.W H, ~(KeyFlag.ralt) & 0xFF     ; Yes, clear flag
+    AND.W H, ~KeyFlag.ralt              ; Yes, clear flag
     JR.W .calculate_combined            ; Break
 
 .no_release:
-    AND.B H, ~(KeyFlag.release) & 0xFF ; Clear release flag
+    AND.B H, ~(KeyFlag.release) & 0xFF  ; Clear release flag
 
     CP.B A, Keycode.lshift              ; Is modifier key?
     JR.W NZ, .6                         ; No, go to next check
@@ -346,7 +348,7 @@ update_keyflags:
 ; Returns:
 ; - A: (Word) KeyEvent
 ;   - A.h: KeyFlags
-;   - A.h: Keycode
+;   - A.l: Keycode
 ;*******************************************************************************
 get_key:
     CALL get_keycode                    ; Get the next keycode
@@ -357,10 +359,60 @@ get_key:
     EXH A                               ; Move flags to A.h
     POP HL                              ; Pop keycode to HL
     LD.B A, H                           ; Move keycode to A.l
-    BKPT 0
     RET
 
+;*******************************************************************************
+; FUNCTION: bool is_caps_kc
+; Returns whether a keycode is affected by Caps Lock
+;
+; Parameters:
+; - A: (Byte) Keycode
+; Returns:
+; - F: (Carry) Set if affected, cleared if not
+;*******************************************************************************
+is_caps_kc:
+    ; Q-P, A-L, Z-M are sequential
+    CP.B A, Keycode.k_q - 1             ; >= Q?
+    JR.B C, .1                          ; No, next check
+    CP.B A, Keycode.k_p + 1             ; <= P?
+    RET C                               ; Yes, return with carry set
+.1:
+    CP.B A, Keycode.k_a - 1             ; >= A?
+    JR.B C, .2                          ; No, next check
+    CP.B A, Keycode.k_l + 1             ; <= L?
+    RET C                               ; Yes, return with carry set
+.2:
+    CP.B A, Keycode.k_z - 1             ; >= Z?
+    JR.B C, .3                          ; No, next check
+    CP.B A, Keycode.k_m + 1             ; <= M?
+    RET C                               ; Yes, return with carry set
+.3:
+    TST.B A, A                          ; Clear carry
+    RET
 
+;*******************************************************************************
+; FUNCTION: bool is_num_kc
+; Returns whether a keycode is affected by Num Lock
+;
+; Parameters:
+; - A: (Byte) Keycode
+; Returns:
+; - F: (Carry) Set if affected, cleared if not
+;*******************************************************************************
+is_num_kc:
+    ; 0-9 are sequential
+    CP.B A, Keycode.kp_0 - 1            ; >= 0?
+    JR.B C, .clear_carry                ; No, clear carry
+    CP.B A, Keycode.kp_9 + 1            ; <= 9?
+    RET C                               ; Yes, return with carry set
+    CP.B A, Keycode.kp_period           ; == .?
+    JR.B Z, .set_carry                  ; Yes, affected
+.clear_carry:
+    TST.B A, A                          ; No, clear carry
+    RET
+.set_carry:
+    SCF
+    RET
 
 ;*******************************************************************************
 ; FUNCTION: char get_ascii(KeyEvent)
@@ -376,8 +428,19 @@ get_ascii:
     TST A, (KeyFlag.release | KeyFlag.ctrl) << 8 ; Is control or release event?
     JR.B NZ, .non_printable             ; Yes, return 0
 
-    ; TODO: Handle Caps Lock, Num Lock, and Shift
+    TST A, KeyFlag.shift << 8           ; Shift pressed?
+    JR.B NZ, .shift_pressed             ; Yes, use shifted keyset
+    TST A, KeyFlag.caps << 8            ; No, is caps lock enabled?
+    JR.B Z, .no_caps                    ; No, other key
+    CALL is_caps_kc                     ; Yes, is this kc modified by caps?
+    JR.B C, .load_shifted               ; Yes, load shifted char
+.no_caps:
+    TST A, KeyFlag.num << 8             ; Is num lock enabled?
+    JR.B Z, .load_regular               ; No, regular key
+    CALL is_num_kc                      ; Yes, is this kc modified by num?
+    JR.B C, .load_shifted               ; Yes, load shifted char
 .load_regular:
+    AND A, 0x00FF                       ; Clear high byte of A for lookup
     CP.B A, kc_to_ascii.size            ; In bounds?
     JR.B NC, .non_printable             ; No, return 0
     LD HL, kc_to_ascii                  ; Yes, load table base pointer
@@ -385,7 +448,18 @@ get_ascii:
     LD.B A, [HL]                        ; Load char from table
     RET
 
+.shift_pressed:
+    TST A, KeyFlag.caps << 8            ; No, is caps lock enabled?
+    JR.B Z, .shift_no_caps              ; No, other key
+    CALL is_caps_kc                     ; Yes, is this kc modified by caps?
+    JR.B C, .load_regular               ; Yes, load regular char
+.shift_no_caps:
+    TST A, KeyFlag.num << 8             ; Is num lock enabled?
+    JR.B Z, .load_shifted               ; No, shifted key
+    CALL is_num_kc                      ; Yes, is this kc modified by num?
+    JR.B C, .load_regular               ; Yes, load regular char
 .load_shifted:
+    AND A, 0x00FF                       ; Clear high byte of A for lookup
     CP.B A, kc_to_shift_ascii.size      ; In bounds?
     JR.B NC, .non_printable             ; No, return 0
     LD HL, kc_to_shift_ascii            ; Yes, load table base pointer

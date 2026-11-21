@@ -213,23 +213,23 @@ kc_to_ascii:
     .DEFB '\0' ; 0x4A Keycode.rctrl
 
     ; Keypad
-    .DEFB '0'  ; 0x4B Keycode.kp_0
-    .DEFB '1'  ; 0x4C Keycode.kp_1
-    .DEFB '2'  ; 0x4D Keycode.kp_2
-    .DEFB '3'  ; 0x4E Keycode.kp_3
-    .DEFB '4'  ; 0x4F Keycode.kp_4
-    .DEFB '5'  ; 0x50 Keycode.kp_5
-    .DEFB '6'  ; 0x51 Keycode.kp_6
-    .DEFB '7'  ; 0x52 Keycode.kp_7
-    .DEFB '8'  ; 0x53 Keycode.kp_8
-    .DEFB '9'  ; 0x54 Keycode.kp_9
+    .DEFB '\0' ; 0x4B Keycode.kp_0
+    .DEFB '\0' ; 0x4C Keycode.kp_1
+    .DEFB '\0' ; 0x4D Keycode.kp_2
+    .DEFB '\0' ; 0x4E Keycode.kp_3
+    .DEFB '\0' ; 0x4F Keycode.kp_4
+    .DEFB '\0' ; 0x50 Keycode.kp_5
+    .DEFB '\0' ; 0x51 Keycode.kp_6
+    .DEFB '\0' ; 0x52 Keycode.kp_7
+    .DEFB '\0' ; 0x53 Keycode.kp_8
+    .DEFB '\0' ; 0x54 Keycode.kp_9
     .DEFB '\0' ; 0x55 Keycode.num_lock
     .DEFB '/'  ; 0x56 Keycode.kp_slash
     .DEFB '*'  ; 0x57 Keycode.kp_star
     .DEFB '-'  ; 0x58 Keycode.kp_minus
     .DEFB '+'  ; 0x59 Keycode.kp_plus
     .DEFB '\n' ; 0x5A Keycode.kp_enter
-    .DEFB '.'  ; 0x5B Keycode.kp_period
+    .DEFB '\0' ; 0x5B Keycode.kp_period
 
     ; Navigation Cluster
     .DEFB '\0' ; 0x5C Keycode.print
